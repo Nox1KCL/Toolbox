@@ -2,11 +2,14 @@ package portcheck
 
 import (
 	"fmt"
-	"log"
-	"os/exec"
+	"io"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
-	"text/tabwriter"
 )
+
+var userRegex = regexp.MustCompile(`users:\(\("([^"]+)",pid=(\d+),fd=(\d+)\)`)
 
 type PortData struct {
 	State            string
@@ -17,10 +20,10 @@ type PortData struct {
 	Killed           string
 }
 
-func FormingMessage(w *tabwriter.Writer, ports []PortData) {
+func FormMessage(w io.Writer, ports []PortData) {
 	fmt.Fprintln(w, "№\tState\tProcess\tLocal Address\tPID\tFD\tKILLED")
 	for i, info := range ports {
-		column := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			i+1,
 			info.State,
 			info.ProcessName,
@@ -29,47 +32,39 @@ func FormingMessage(w *tabwriter.Writer, ports []PortData) {
 			info.FD,
 			info.Killed,
 		)
-		fmt.Fprint(w, column)
-
-		if i < len(ports)-1 {
-			fmt.Fprint(w, "")
-		}
 	}
 	fmt.Fprintln(w)
 
 }
 
-func (p *PortData) Fill(column []string, port string) {
-	p.State = column[0]
+func (p *PortData) Fill(elements []string, port string) {
+	if len(elements) == 0 {
+		return
+	}
 
-	for i, v := range column {
+	p.State = elements[0]
+	for _, v := range elements {
 		if strings.Contains(v, port) {
-			p.LocalAddressPort = column[i]
-		} else if strings.Contains(v, "users") {
-			users := strings.Split(column[i], "(")
-			data := strings.Split(users[2], ")")
-			complete := strings.Split(data[0], ",")
-
-			p.ProcessName = complete[0]
-			p.PID = complete[1]
-			p.FD = complete[2]
+			p.LocalAddressPort = v
+		}
+		if matches := userRegex.FindStringSubmatch(v); len(matches) == 4 {
+			p.ProcessName = matches[1]
+			p.PID = matches[2]
+			p.FD = matches[3]
 		}
 	}
+
 }
 
-func (p *PortData) Kill(kill bool) {
-	if kill {
-		strPID := fmt.Sprintf("%s", strings.Split(p.PID, "=")[1])
-		cmd := exec.Command("kill", strPID)
-		err := cmd.Run()
-		if err != nil {
-			log.Print(err)
-			p.Killed = "No"
-		} else {
-			p.Killed = "Yes"
-		}
-	} else {
-		p.Killed = "Not requested"
+func KillProcess(processPid string) error {
+	pid, err := strconv.Atoi(processPid)
+	if err != nil {
+		return err
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
 	}
 
+	return proc.Kill()
 }

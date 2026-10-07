@@ -22,14 +22,12 @@ func main() {
 	var flags Flags
 	flags.Parse() // Моя комплексна функція для створення і парсингу флагів
 
-	var cmd *exec.Cmd
 	strPort := fmt.Sprintf(":%d", flags.port)
-	cmd = exec.Command("ss", "-tlnp", "sport", "=", strPort)
+	cmd := exec.Command("ss", "-tlnp", "sport", "=", strPort)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("trying execute command %v: %v", cmd, err)
-		os.Exit(1)
+		log.Fatalf("trying execute command %v: %v", cmd, err)
 	}
 	text := string(output)
 
@@ -40,16 +38,30 @@ func main() {
 			continue
 		}
 		var port portcheck.PortData
-		column := strings.Fields(line)
+		elements := strings.Fields(line)
 
-		port.Fill(column, strPort)
-		port.Kill(flags.kill)
+		port.Fill(elements, strPort)
+
+		if flags.kill {
+			if err := portcheck.KillProcess(port.PID); err != nil {
+				port.Killed = "No"
+			} else {
+				port.Killed = "Yes"
+			}
+		} else {
+			port.Killed = "Not requested"
+		}
 
 		ports = append(ports, port)
 	}
+	if len(ports) == 0 {
+		fmt.Printf("No process is listening on port %d\n", flags.port)
+		return
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
 
-	portcheck.FormingMessage(w, ports)
+	portcheck.FormMessage(w, ports)
 	w.Flush()
 }
 
@@ -63,8 +75,9 @@ func (f *Flags) Parse() {
 	flag.BoolVar(&f.kill, "kill", false, "kill port process you entered")
 	flag.Parse()
 
-	if flag.NFlag() == 0 {
+	if f.port <= 0 || f.port > 65535 {
+		fmt.Fprintln(os.Stderr, "Error: valid port (1-65535) is required")
 		flag.Usage()
-		os.Exit(0)
+		os.Exit(1)
 	}
 }
